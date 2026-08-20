@@ -10,26 +10,51 @@ AWE A2Z is a public, searchable archive of ideas and thoughts.
 - Every published idea receives a unique ID and its own public webpage.
 - Contributions are intended to be freely reusable by everyone.
 - **AWE does not claim ownership of ideas published in A2Z.**
-- The public archive is read from `AWEArchiveDB/a2zdb.json`.
+- The public archive is read directly from `AWEArchiveDB/a2zdb.json` via the GitHub raw URL.
 
 ## Database
 
 Canonical database:
 `https://raw.githubusercontent.com/ARARAT33/AWEArchiveDB/refs/heads/main/a2zdb.json`
 
+All normal browsing, search, categories, counters and idea pages are **static** and read this raw JSON directly. They do not call a Cloudflare Function.
+
 ## Cloudflare Pages
 
-The frontend is static HTML/CSS/JS. A tiny Pages Function is used only for secure writes because a GitHub token must never be shipped to browser JavaScript.
+The frontend is static HTML/CSS/JS. A tiny Pages Function is used **only when the user presses Publish**. This keeps normal site traffic independent of the publishing Function.
 
 Create a Cloudflare Pages project from this repository and add this **secret**:
 
 `GITHUB_TOKEN` — a GitHub token with only the minimum required permission to update `ARARAT33/AWEArchiveDB`.
 
-The function lives at `functions/api/ideas.js` and receives `POST /api/ideas`.
+The function lives at `functions/api/ideas.js` and handles `POST /api/ideas`.
 
-## Publishing
+## Rate limiting and publishing capacity
 
-The user writes the complete idea, selects a category, optionally stays anonymous, accepts the public-use confirmation, and publishes. The function assigns the next numeric ID, appends the record to `a2zdb.json`, commits it through the GitHub API, and returns the ID.
+A2Z enforces a hard application publishing cap of **100,000 published ideas per UTC day**. The static homepage calculates today's published count directly from the raw database and shows the live count and remaining capacity. When 100,000 is reached, the publishing UI closes and the Function rejects further publications until the next UTC day.
+
+Abuse controls are also enforced at the Cloudflare Function layer:
+
+- **10 ideas per IP per rolling hour bucket**;
+- **50 ideas per IP per UTC day**.
+
+For these IP limits, create a Cloudflare KV namespace and bind it to the Function as `RATE_LIMIT_KV`. The binding configuration is shown in `wrangler.toml`. If the KV binding is absent, the GitHub publishing function still works, but IP rate limiting is not enforced; for production, configure the KV binding.
+
+### Important distinction
+
+The 100,000/day number above is the **A2Z application publishing cap**. It is intentionally aligned with the Free-plan Workers/Pages Functions request budget discussed for this architecture, but it is not a claim that Cloudflare will always expose exactly 100,000 requests/day under every current product/plan configuration. The Cloudflare dashboard is the authoritative source for the account's actual service quota.
+
+## Publishing flow
+
+1. User writes the complete idea.
+2. The browser sends one publish request to `/api/ideas`.
+3. Cloudflare validates the request and rate limits.
+4. The Function reads the current `a2zdb.json` through GitHub API.
+5. It appends the new anonymous idea and commits the updated JSON through GitHub API.
+6. The Function returns the new ID.
+7. The user is sent to their permanent public idea page.
+
+The GitHub token never appears in browser JavaScript.
 
 ## Individual idea pages
 
@@ -66,7 +91,7 @@ The canonical `a2zdb.json` should be a JSON array:
     "anonymous": true,
     "created": "2026-08-21T00:00:00.000Z",
     "public_domain": true,
-    "ownership": "AWE claims no ownership of this idea"
+    "ownership": "AWE does not claim ownership of this idea"
   }
 ]
 ```
